@@ -1,0 +1,277 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  customer
+  worker
+  admin
+}
+
+enum VerificationStatus {
+  pending
+  approved
+  rejected
+}
+
+enum JobStatus {
+  posted
+  accepted
+  in_progress
+  completed
+  cancelled
+  disputed
+}
+
+enum JobType {
+  broadcast
+  direct
+}
+
+enum PaymentStatus {
+  pending
+  confirmed
+  rejected
+}
+
+enum WalletTransactionType {
+  job_payment
+  withdrawal
+  adjustment
+}
+
+model User {
+  id            String   @id @default(cuid())
+  phone         String   @unique
+  fullName      String?
+  email         String?  @unique
+  role          Role     @default(customer)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workerProfile     WorkerProfile?
+  customerJobs      Job[]             @relation("CustomerJobs")
+  workerJobs        Job[]             @relation("WorkerJobs")
+  refreshTokens     RefreshToken[]
+  ratingsGiven      Rating[]          @relation("RatingAuthor")
+  ratingsReceived   Rating[]          @relation("RatingTarget")
+  disputesRaised    Dispute[]         @relation("DisputeRaisedBy")
+
+  @@index([phone])
+  @@index([role])
+}
+
+model WorkerProfile {
+  id                 String             @id @default(cuid())
+  userId             String             @unique
+  bio                String?
+  cnicNumber         String?
+  cnicFrontPath      String?
+  cnicBackPath       String?
+  verificationStatus VerificationStatus @default(pending)
+  rejectionReason    String?
+  submittedAt        DateTime?
+  approvedAt         DateTime?
+  hourlyRate         Float?
+  experienceYears    Int?
+  isAvailable        Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skills    WorkerSkill[]
+  wallet    Wallet?
+  locations Location[]
+
+  @@index([verificationStatus])
+}
+
+model WorkerSkill {
+  id        String   @id @default(cuid())
+  workerId  String
+  skill     String
+  createdAt DateTime @default(now())
+
+  worker WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([workerId, skill])
+  @@index([skill])
+}
+
+model Job {
+  id             String    @id @default(cuid())
+  title          String
+  description    String
+  skill          String
+  type           JobType   @default(broadcast)
+  status         JobStatus @default(posted)
+  estimatedHours Float?
+  amount         Float
+  latitude       Float?
+  longitude      Float?
+  address        String?
+  customerId     String
+  workerId       String?
+  selectedAt     DateTime?
+  acceptedAt     DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  cancelledAt    DateTime?
+  paymentStatus  String    @default("unpaid")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  customer   User             @relation("CustomerJobs", fields: [customerId], references: [id])
+  worker     User?            @relation("WorkerJobs", fields: [workerId], references: [id])
+  acceptances JobAcceptance[]
+  payment    Payment?
+  ratings    Rating[]
+  disputes   Dispute[]
+
+  @@index([status])
+  @@index([skill])
+  @@index([customerId])
+  @@index([workerId])
+  @@index([type])
+}
+
+model JobAcceptance {
+  id         String   @id @default(cuid())
+  jobId      String
+  workerId   String
+  acceptedAt DateTime @default(now())
+  isSelected Boolean  @default(false)
+
+  job    Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  worker User @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, workerId])
+  @@index([jobId])
+  @@index([workerId])
+}
+
+model Location {
+  id        String   @id @default(cuid())
+  workerId  String
+  latitude  Float
+  longitude Float
+  timestamp DateTime @default(now())
+
+  worker WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId])
+  @@index([timestamp])
+}
+
+model Payment {
+  id                   String        @id @default(cuid())
+  jobId                String        @unique
+  amount               Float
+  status               PaymentStatus @default(pending)
+  transactionReference String?
+  screenshotPath       String?
+  submittedAt          DateTime      @default(now())
+  confirmedAt          DateTime?
+  confirmedBy          String?
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model Wallet {
+  id        String   @id @default(cuid())
+  workerId  String   @unique
+  balance   Float    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  worker       WorkerProfile       @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@index([workerId])
+}
+
+model WalletTransaction {
+  id          String                @id @default(cuid())
+  walletId    String
+  type        WalletTransactionType
+  amount      Float
+  balance     Float
+  reference   String?
+  description String?
+  createdAt   DateTime              @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId])
+  @@index([type])
+}
+
+model Rating {
+  id         String   @id @default(cuid())
+  jobId      String
+  authorId   String
+  targetId   String
+  rating     Int
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  job    Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  author User @relation("RatingAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  target User @relation("RatingTarget", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, authorId])
+  @@index([targetId])
+}
+
+model Dispute {
+  id         String   @id @default(cuid())
+  jobId      String
+  raisedById String
+  reason     String
+  status     String   @default("open")
+  resolutionNote String?
+  resolvedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  job      Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  raisedBy User @relation("DisputeRaisedBy", fields: [raisedById], references: [id])
+
+  @@index([jobId])
+  @@index([status])
+}
+
+model AdminUser {
+  id           String           @id @default(cuid())
+  email        String           @unique
+  passwordHash String
+  fullName     String?
+  isActive     Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  refreshTokens RefreshToken[]
+}
+
+model RefreshToken {
+  id          String   @id @default(cuid())
+  token       String   @unique
+  userId      String?
+  adminUserId String?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  user      User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  adminUser AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([adminUserId])
+  @@index([token])
+}
